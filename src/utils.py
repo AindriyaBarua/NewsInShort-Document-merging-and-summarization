@@ -11,10 +11,18 @@ from gensim.summarization import summarize as gensim_summarize
 from bs4 import BeautifulSoup
 from GoogleNews import GoogleNews
 
-stopwords = stopwords.words("english")
+import fasttext
+import fasttext.util
 
 
-def loadEmbeddingModel():
+def getHindiStopwords(stopwords_file = "hindi_stopwords.txt"):
+    with open(stopwords_file) as file:
+        stopwords_hin = file.readlines()
+        stopwords_hin = [line.rstrip() for line in stopwords_hin]
+    return stopwords_hin
+
+
+def loadEmbeddingModel(language_code, embedding_model_name):
     loading = True
     tries = 0
     print("Loading pre-trained embedding model...")
@@ -22,7 +30,8 @@ def loadEmbeddingModel():
     while loading:
         try:
             tries = tries + 1
-            w2v_model = api.load("word2vec-google-news-300")
+            fasttext.util.download_model(language_code, if_exists='ignore')
+            ft_model = fasttext.load_model(embedding_model_name)
             loading = False
             print("Loading complete.")
         except Exception as ConnectionResetError:
@@ -31,7 +40,7 @@ def loadEmbeddingModel():
                 print('\nTrying again...\n')
             else:
                 print('\nExecution terminated with error:', ConnectionResetError)
-    return w2v_model
+    return ft_model
 
 
 def cosineSimilarity(A, B):
@@ -60,13 +69,12 @@ def getDocuments(urls):
     return articles
 
 
-def merge(documents, w2v_model, threshold = 0.85):
-
-    def get_custom_wv(word):
+def merge(documents, ft_model, threshold=0.85):
+    def get_custom_ft(word):
         try:
-            return w2v_model.get_vector(word)
+            return ft_model[word]
         except:
-            return np.zeros(w2v_model.vector_size)
+            return np.zeros(ft_model.vector_size)
 
     documents_sentences = list(map(sent_tokenize, documents))
     largest_document = max(documents_sentences, key=len)
@@ -78,9 +86,9 @@ def merge(documents, w2v_model, threshold = 0.85):
             position = list()
             for final_document_line_position, final_document_line in enumerate(final_document):
                 document_line_vector = np.mean(
-                    [get_custom_wv(word) for word in document_line.split()], axis=0)
+                    [get_custom_ft(word) for word in document_line.split()], axis=0)
                 final_document_line_vector = np.mean(
-                    [get_custom_wv(word) for word in final_document_line.split()], axis=0)
+                    [get_custom_ft(word) for word in final_document_line.split()], axis=0)
                 similarity = cosineSimilarity(
                     document_line_vector, final_document_line_vector)
                 position.append((final_document_line_position, similarity))
@@ -91,7 +99,7 @@ def merge(documents, w2v_model, threshold = 0.85):
     return " ".join(final_document)
 
 
-def summarize(corpus, mode='rank', ratio=0.5, num_sentences=15):
+def summarize(corpus, stopwords, mode='rank', ratio=0.5, num_sentences=15):
     if mode == "frequency":
         sentence_list = sent_tokenize(corpus)
         formatted_article_text = corpus
